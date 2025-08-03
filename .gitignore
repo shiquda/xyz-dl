@@ -1,0 +1,25 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# 认证信息和敏感数据
+credentials.json
+
+# 下载的文件
+download/
+
+# 临时文件
+*.tmp
+*.log
+
+data/
+.claude/
+xyz-dl.spec
+xyz-config.json

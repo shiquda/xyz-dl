@@ -1,0 +1,1 @@
+.venv\Scripts\python -m PyInstaller -F --name xyz-dl main.py
