@@ -1,5 +1,8 @@
 """
 认证管理模块
+
+基于 Refresh Token 的认证方式
+用户需要从小宇宙APP或网页抓包获取 refresh_token
 """
 import json
 import os
@@ -9,16 +12,16 @@ from typing import Optional, Dict, Any
 try:
     from .api import XiaoyuzhouAPI
     from .config import config
-    from .utils import generate_device_id, validate_phone_number, validate_area_code
+    from .utils import generate_device_id, get_android_device_properties
 except ImportError:
     # 如果作为独立模块运行
     from api import XiaoyuzhouAPI
     from config import config
-    from utils import generate_device_id, validate_phone_number, validate_area_code
+    from utils import generate_device_id, get_android_device_properties
 
 
 class XiaoyuzhouAuth:
-    """小宇宙认证管理类"""
+    """小宇宙认证管理类 - 基于 Refresh Token"""
 
     def __init__(self):
         self.api = XiaoyuzhouAPI()
@@ -27,47 +30,46 @@ class XiaoyuzhouAuth:
         self.refresh_token: Optional[str] = None
         self.device_id: Optional[str] = None
         self.credentials_file = config.credentials_file
-
-    def send_sms_code(self, mobile_phone: str, area_code: str = "+86") -> Dict[str, Any]:
-        """发送短信验证码"""
-        # 验证输入
-        if not validate_phone_number(mobile_phone):
-            return {"success": False, "error": "手机号格式不正确"}
-
-        if not validate_area_code(area_code):
-            return {"success": False, "error": "区号格式不正确"}
-
-        return self.api.send_sms_code(mobile_phone, area_code)
-
-    def login_with_sms(self, mobile_phone: str, verify_code: str, area_code: str = "+86") -> Dict[str, Any]:
-        """使用SMS验证码登录"""
-        # 验证输入
-        if not validate_phone_number(mobile_phone):
-            return {"success": False, "error": "手机号格式不正确"}
-
-        if not verify_code.strip():
-            return {"success": False, "error": "验证码不能为空"}
-
-        if not validate_area_code(area_code):
-            return {"success": False, "error": "区号格式不正确"}
-
-        result = self.api.login_with_sms(mobile_phone, verify_code, area_code)
-
-        if result["success"]:
-            # 保存认证信息
-            self.access_token = result["access_token"]
-            self.refresh_token = result["refresh_token"]
-
-            if not self.device_id:
-                self.device_id = generate_device_id()
-
-            # 更新API实例的认证信息
+        
+        # 尝试加载凭据
+        self.load_credentials()
+        
+        # 如果没有device_id，生成一个新的
+        if not self.device_id:
+            self.device_id = generate_device_id()
             self.api.update_credentials(self.access_token, self.device_id)
 
-            # 添加device_id到返回结果
-            result["device_id"] = self.device_id
+    def login_with_refresh_token(self, refresh_token: str, device_id: str) -> Dict[str, Any]:
+        """使用 Refresh Token 登录
 
-        return result
+        Args:
+            refresh_token: 从小宇宙APP或网页抓包获取的 refresh_token
+            device_id: 与 refresh_token 绑定的 device_id (x-jike-device-id)
+
+        Returns:
+            Dict包含 success, access_token, refresh_token, device_id
+        """
+        if not refresh_token or not refresh_token.strip():
+            return {"success": False, "error": "refresh_token 不能为空"}
+
+        if not device_id or not device_id.strip():
+            return {"success": False, "error": "device_id 不能为空"}
+
+        self.refresh_token = refresh_token.strip()
+        self.device_id = device_id.strip()
+
+        if self.refresh_access_token():
+            return {
+                "success": True,
+                "access_token": self.access_token,
+                "refresh_token": self.refresh_token,
+                "device_id": self.device_id
+            }
+        else:
+            return {
+                "success": False,
+                "error": "refresh_token 或 device_id 无效，请重新获取"
+            }
 
     def save_credentials(self, filepath: Optional[str] = None) -> bool:
         """保存认证信息到文件"""
@@ -117,84 +119,32 @@ class XiaoyuzhouAuth:
         return False
 
     def interactive_login(self) -> bool:
-        """交互式登录"""
+        """交互式登录 - 使用 Refresh Token"""
         try:
-            print("🔐 开始手机号登录流程")
+            print("🔐 小宇宙认证")
+            print("=" * 50)
 
-            # 输入手机号
-            mobile_phone = input("请输入手机号: ").strip()
-            if not mobile_phone:
-                print("❌ 手机号不能为空")
+            refresh_token = input("请输入 refresh_token: ").strip()
+            if not refresh_token:
+                print("❌ refresh_token 不能为空")
                 return False
 
-            if not validate_phone_number(mobile_phone):
-                print("❌ 手机号格式不正确")
+            device_id = input("请输入 device_id: ").strip()
+            if not device_id:
+                print("❌ device_id 不能为空")
                 return False
 
-            area_code = input("请输入区号 (默认 +86): ").strip()
-            if not area_code:
-                area_code = "+86"
+            print("🔑 正在登录...")
+            result = self.login_with_refresh_token(refresh_token, device_id)
 
-            if not validate_area_code(area_code):
-                print("❌ 区号格式不正确")
+            if result["success"]:
+                print("✅ 登录成功!")
+                self.save_credentials()
+                return True
+            else:
+                print(f"❌ 登录失败: {result.get('error', '未知错误')}")
                 return False
 
-            # 发送验证码
-            print("📱 正在发送验证码...")
-            sms_result = self.send_sms_code(mobile_phone, area_code)
-
-            if not sms_result["success"]:
-                print(f"❌ 发送验证码失败: {sms_result['error']}")
-                return False
-
-            print("✅ 验证码已发送")
-
-            # 验证码重试机制 - 最多尝试3次
-            max_attempts = 3
-            for attempt in range(max_attempts):
-                # 输入验证码
-                if attempt > 0:
-                    print(f"\n📱 剩余 {max_attempts - attempt} 次尝试机会")
-                
-                verify_code = input("请输入验证码: ").strip()
-                if not verify_code:
-                    print("❌ 验证码不能为空")
-                    continue
-
-                # 登录
-                print("🔑 正在登录...")
-                login_result = self.login_with_sms(mobile_phone, verify_code, area_code)
-
-                if login_result["success"]:
-                    print("✅ 登录成功!")
-                    self.save_credentials()
-                    return True
-                else:
-                    error_msg = login_result.get('error', '未知错误')
-                    print(f"❌ 登录失败: {error_msg}")
-                    
-                    # 检查是否是验证码错误
-                    if "验证码" in error_msg and attempt < max_attempts - 1:
-                        print("💡 请检查验证码是否正确，或重新获取验证码")
-                        
-                        # 询问是否重新发送验证码
-                        resend = input("是否重新发送验证码? (y/N): ").lower().strip()
-                        if resend == 'y':
-                            print("📱 正在重新发送验证码...")
-                            sms_result = self.send_sms_code(mobile_phone, area_code)
-                            if sms_result["success"]:
-                                print("✅ 验证码已重新发送")
-                            else:
-                                print(f"❌ 重新发送失败: {sms_result['error']}")
-                                return False
-                        continue
-                    else:
-                        # 非验证码错误或已达到最大尝试次数
-                        return False
-
-            print("❌ 验证码尝试次数已用完，登录失败")
-            return False
-            
         except KeyboardInterrupt:
             print("\n⚠️ 登录过程被用户中断")
             return False
@@ -207,37 +157,58 @@ class XiaoyuzhouAuth:
 
         try:
             import requests
+            import urllib3
+            from datetime import datetime
 
             refresh_url = "https://api.xiaoyuzhoufm.com/app_auth_tokens.refresh"
+
+            now = datetime.now()
+            local_time = now.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + "+0800"
+
             refresh_headers = {
-                "User-Agent": "okhttp/4.10.0",
+                "User-Agent": "okhttp/4.12.0",
                 "Accept-Encoding": "gzip",
-                "Content-Type": "application/json",
-                "x-jike-refresh-token": self.refresh_token
+                "os": "android",
+                "os-version": "32",
+                "manufacturer": "vivo",
+                "model": "V2366GA",
+                "resolution": "1080x1920",
+                "market": "update",
+                "applicationid": "app.podcast.cosmos",
+                "app-version": "2.91.0",
+                "app-buildno": "1305",
+                "x-jike-device-id": self.device_id if self.device_id else "",
+                "webviewversion": "101.0.4951.61",
+                "app-permissions": "100100",
+                "wificonnected": "true",
+                "timezone": "Asia/Shanghai",
+                "local-time": local_time,
+                "x-jike-access-token": self.access_token if self.access_token else "",
+                "x-jike-refresh-token": self.refresh_token,
+                "x-jike-device-properties": get_android_device_properties(self.device_id),
+                "sentry-trace": "00000000000000000000000000000000-0000000000000000-0"
             }
 
             print("🔄 正在刷新access_token...")
-            response = requests.post(
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+            response = requests.get(
                 refresh_url,
                 headers=refresh_headers,
-                json={},
-                timeout=10
+                timeout=10,
+                verify=False
             )
 
             if response.status_code == 200:
-                refresh_data = response.json()
-                new_access_token = refresh_data.get("x-jike-access-token")
-                new_refresh_token = refresh_data.get("x-jike-refresh-token")
+                new_access_token = response.headers.get("x-jike-access-token")
+                new_refresh_token = response.headers.get("x-jike-refresh-token")
 
                 if new_access_token:
                     self.access_token = new_access_token
                     if new_refresh_token:
                         self.refresh_token = new_refresh_token
 
-                    # 更新API实例的认证信息
                     self.api.update_credentials(self.access_token, self.device_id)
-
-                    # 保存新的认证信息
                     self.save_credentials()
 
                     print("✅ access_token刷新成功!")
@@ -262,17 +233,17 @@ class XiaoyuzhouAuth:
 
         try:
             import requests
+            import urllib3
 
             verify_url = "https://api.xiaoyuzhoufm.com/v1/profile/get"
-            verify_headers = {
-                "User-Agent": "okhttp/4.10.0",
-                "Accept-Encoding": "gzip",
-                "Content-Type": "application/json",
+            verify_headers = self.api.get_default_headers()
+            verify_headers.update({
                 "x-jike-access-token": self.access_token,
                 "x-jike-device-id": self.device_id
-            }
+            })
 
-            response = requests.get(verify_url, headers=verify_headers, json={}, timeout=10)
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            response = requests.get(verify_url, headers=verify_headers, json={}, timeout=10, verify=False)
             return response.status_code == 200
 
         except Exception:

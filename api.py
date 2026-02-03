@@ -2,13 +2,19 @@
 小宇宙API接口封装
 """
 import requests
+import urllib3
 from typing import Dict, Any, Optional
+from datetime import datetime
+import time
 
 try:
     from .config import config
 except ImportError:
     # 如果作为独立模块运行
     from config import config
+
+# 禁用SSL证书验证警告
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 class XiaoyuzhouAPI:
@@ -19,13 +25,13 @@ class XiaoyuzhouAPI:
         self.access_token = access_token
         self.device_id = device_id
         self.session = requests.Session()
-        self.auth_handler = None  # 将在外部设置
+        self.session.verify = False
+        self.auth_handler = None
 
-        # 设置基础请求头
         self.session.headers.update({
-            'User-Agent': 'okhttp/4.7.2',
+            'User-Agent': 'okhttp/4.12.0',
             'applicationid': 'app.podcast.cosmos',
-            'app-version': '1.6.0',
+            'app-version': '2.91.0',
             'Content-Type': 'application/json'
         })
 
@@ -67,37 +73,47 @@ class XiaoyuzhouAPI:
 
     def get_default_headers(self) -> Dict[str, str]:
         """获取默认请求头"""
+        now = datetime.now()
+        local_time = now.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + "+0800"
+        
         return {
             "Host": "api.xiaoyuzhoufm.com",
-            "App-BuildNo": "1576",
-            "OS": "ios",
-            "Manufacturer": "Apple",
-            "BundleID": "app.podcast.cosmos",
-            "abtest-info": '{"old_user_discovery_feed":"enable"}',
-            "Accept-Language": "zh-Hant-HK;q=1.0, zh-Hans-CN;q=0.9",
-            "Accept": "*/*",
-            "Content-Type": "application/json",
-            "App-Version": "2.57.1",
-            "WifiConnected": "true",
-            "OS-Version": "17.4.1",
-            "Model": "iPhone14,2",
-            "app-permissions": "4",
-            "User-Agent": "okhttp/4.7.2"
+            "User-Agent": "okhttp/4.12.0",
+            "os": "android",
+            "os-version": "32",
+            "manufacturer": "vivo",
+            "model": "V2366GA",
+            "resolution": "1080x1920",
+            "market": "update",
+            "applicationid": "app.podcast.cosmos",
+            "app-version": "2.91.0",
+            "app-buildno": "1305",
+            "webviewversion": "101.0.4951.61",
+            "app-permissions": "100100",
+            "wificonnected": "true",
+            "timezone": "Asia/Shanghai",
+            "local-time": local_time,
+            "content-type": "application/json;charset=utf-8",
+            "Accept-Encoding": "gzip",
+            "sentry-trace": "00000000000000000000000000000000-0000000000000000-0",
         }
 
     def get_sendcode_headers(self) -> Dict[str, str]:
         """获取发送验证码专用请求头"""
         headers = self.get_default_headers()
-        headers.update({
-            "User-Agent": "Xiaoyuzhou/2.57.1 (build:1576; iOS 17.4.1)",
-            "Market": "AppStore",
-            "Connection": "keep-alive",
-            "Accept-Encoding": "br;q=1.0, gzip;q=0.9, deflate;q=0.8",
-            "x-custom-xiaoyuzhou-app-dev": ""
-        })
+        
+        if self.device_id:
+            headers['x-jike-device-id'] = self.device_id
+            
+            try:
+                from utils import get_android_device_properties
+                headers['x-jike-device-properties'] = get_android_device_properties(self.device_id)
+            except ImportError:
+                pass
+                
         return headers
 
-    def send_sms_code(self, mobile_phone: str, area_code: str = "+86") -> Dict[str, Any]:
+    def send_sms_code(self, mobile_phone: str, area_code: str = "+86", captcha_token: Optional[str] = None) -> Dict[str, Any]:
         """发送短信验证码"""
         url = f"{self.base_url}/v1/auth/sendCode"
         headers = self.get_sendcode_headers()
@@ -106,9 +122,14 @@ class XiaoyuzhouAPI:
             "mobilePhoneNumber": mobile_phone,
             "areaCode": area_code
         }
+        
+        if captcha_token:
+            payload["captchaVerifyParam"] = captcha_token
 
         try:
-            response = requests.post(url, json=payload, headers=headers)
+            # 使用json.dumps确保内容格式控制，特别是对于嵌套的json字符串
+            import json
+            response = requests.post(url, data=json.dumps(payload), headers=headers)
 
             print(f"🔍 发送验证码响应状态码: {response.status_code}")
             if response.status_code != 200:
@@ -216,7 +237,7 @@ class XiaoyuzhouAPI:
 
         # 确保使用正确的请求头
         headers = {
-            'User-Agent': 'okhttp/4.10.0',
+            'User-Agent': 'okhttp/4.12.0',
             'Accept-Encoding': 'gzip',
             'Content-Type': 'application/json'
         }
@@ -237,22 +258,22 @@ class XiaoyuzhouAPI:
     def get_private_media_url(self, eid: str) -> Dict[str, Any]:
         """获取付费音频的私有媒体URL"""
         url = f"{self.base_url}/v1/private-media/get"
-        
+
         params = {"eid": eid}
-        
+
         # 确保使用正确的请求头
         headers = {
-            'User-Agent': 'okhttp/4.10.0',
+            'User-Agent': 'okhttp/4.12.0',
             'Accept-Encoding': 'gzip',
             'Content-Type': 'application/json'
         }
-        
+
         # 添加认证信息
         if self.access_token:
             headers['x-jike-access-token'] = self.access_token
         if self.device_id:
             headers['x-jike-device-id'] = self.device_id
-        
+
         try:
             response = self._make_request_with_retry("GET", url, params=params, headers=headers)
             response.raise_for_status()

@@ -90,6 +90,27 @@ def extract_podcast_id_from_url(url_or_id: str) -> Optional[str]:
     return None
 
 
+def get_android_device_properties(device_id: Optional[str] = None) -> str:
+    """生成Android设备属性JSON字符串"""
+    if not device_id:
+        device_id = generate_device_id()
+    
+    # 生成一个随机的android_id (16位hex)
+    android_id = uuid.uuid4().hex[:16]
+    
+    props = {
+        "uuid": device_id,
+        "android_id": android_id,
+        "oaid": "",
+        "vaid": "",
+        "aaid": ""
+    }
+    
+    import json
+    return json.dumps(props, separators=(',', ':'))
+
+
+
 def extract_episode_id_from_url(url_or_id: str) -> Optional[str]:
     """从单集URL中提取单集ID"""
     # 如果已经是ID格式，直接返回

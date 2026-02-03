@@ -8,9 +8,12 @@ from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Optional, Any
 import requests
+import urllib3
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from tqdm import tqdm
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 try:
     from .auth import XiaoyuzhouAuth
@@ -45,6 +48,8 @@ class XiaoyuzhouDownloader:
     def create_robust_session(self):
         """创建具有重试机制的下载会话"""
         session = requests.Session()
+
+        session.verify = False
 
         # 配置重试策略
         retry_strategy = Retry(

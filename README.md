@@ -4,8 +4,8 @@
 
 ## ✨ 主要功能
 
-- 🔐 **手机号登录** - 支持小宇宙账号登录
-- 📻 **播客下载** - 下载整个播客的所有集数  
+- 🔐 **Token 认证** - 使用 refresh_token 和 device_id 认证
+- 📻 **播客下载** - 下载整个播客的所有集数
 - 🎵 **单集下载** - 下载指定的单个播客集数
 - 📊 **限制下载** - 可设置最大下载集数
 - 📈 **下载进度** - 实时显示下载进度条
@@ -19,7 +19,7 @@
 - Python 3.13+
 - 依赖包：`requests`, `tqdm`
 
-### 使用
+### 安装
 
 ```bash
 # 克隆项目
@@ -28,27 +28,28 @@ cd xyz-dl
 
 # 安装依赖
 uv sync
-
 ```
 
-### 基本使用
+## 📖 使用方法
 
-💡 **提示**：如果你是第一次使用，推荐先运行 `python main.py` 进入交互式模式，它会引导你完成所有设置。
+### 首次使用
 
-#### 1️⃣ 交互式模式（推荐新手）
+首次使用需要登录认证：
 
 ```bash
-python main.py
+# 交互式登录（推荐）
+python main.py --login
+# 按提示输入 refresh_token 和 device_id
+
+# 或命令行直接指定
+python main.py --refresh-token <your_token> --device-id <your_device_id>
 ```
 
-程序会引导你完成登录和下载设置。
+认证信息会自动保存到 `credentials.json`，后续无需重复登录。
 
-#### 2️⃣ 命令行模式
+### 下载播客
 
 ```bash
-# 首次使用需要登录，可使用交互式模式进行设置
-python main.py
-
 # 下载整个播客
 python main.py 682c566cc7c5f17595635a2c
 
@@ -68,37 +69,24 @@ python main.py 682c566cc7c5f17595635a2c --output /path/to/download
 python main.py 682c566cc7c5f17595635a2c --save-only
 ```
 
-## 📖 详细用法
+### 获取播客链接
 
-### 获取播客专辑/单集URL
+- 播客专辑页面：`https://www.xiaoyuzhoufm.com/podcast/<podcast_id>`
+- 播客单集页面：`https://www.xiaoyuzhoufm.com/episode/<episode_id>`
 
-可从APP>分享>复制链接中获取。例如：
+可从 APP > 分享 > 复制链接 中获取。
 
-- 播客专辑页面：`https://www.xiaoyuzhoufm.com/podcast/6013f9f58e2f7ee375cf4216`
-- 播客单集页面：`https://www.xiaoyuzhoufm.com/episode/688c67368e06fe8de7ca55f8`
-
-### 命令行参数
+## 🔧 命令行参数
 
 | 参数 | 说明 | 示例 |
 |------|------|------|
-| `--login` | 手机号登录 | `python main.py --login` |
+| `--login` | 交互式登录 | `python main.py --login` |
+| `--refresh-token` | 指定 refresh_token（需配合 --device-id） | `--refresh-token <token>` |
+| `--device-id` | 指定 device_id | `--device-id <device_id>` |
 | `--max-episodes` | 最大下载集数 | `--max-episodes 50` |
 | `--output, -o` | 下载目录 | `--output /path/to/download` |
 | `--save-only` | 仅保存数据，不下载 | `--save-only` |
 | `--from-json` | 从JSON文件下载 | `--from-json data/podcast.json` |
-
-### 配置文件
-
-项目使用 `xyz-config.json` 进行配置：
-
-```json
-{
-  "download": {
-    "download_dir": "download",  // 默认下载目录
-    "timeout": 60            // 下载超时时间
-  }
-}
-```
 
 ## 📁 项目结构
 
@@ -110,26 +98,26 @@ xyz-dl/
 ├── api.py           # API接口
 ├── config.py        # 配置管理
 ├── utils.py         # 工具函数
-├── xyz-config.json      # 配置文件
+├── xyz-config.json  # 配置文件
 └── pyproject.toml   # 项目配置
 ```
 
 ## ⚠️ 注意事项
 
 - ⚠️ 本工具为个人离线学习和收听提供便利，在使用时请遵守小宇宙平台的相关规定，切勿在互联网上公开传播，禁止用于商业目的。
-- 首次使用需要手机号登录验证
-- 认证信息会自动保存，无需重复登录
+- 认证信息（`credentials.json`）包含个人敏感信息，请勿分享给他人。
+- 下载的文件仅供个人使用，请尊重版权。
 
 ## 🐛 常见问题
 
 **Q: 登录失败怎么办？**  
-A: 确保手机号格式正确，验证码输入及时，网络连接正常。
+A: 请检查 refresh_token 和 device_id 是否正确，两者必须匹配。
 
 **Q: 找不到播客ID？**  
 A: 从小宇宙网页URL中复制，或在手机APP>分享中获取播客专辑/单集URL。
 
 **Q: 下载失败？**  
-A: 检查网络连接，确认播客是否公开访问，重试登录。
+A: 检查网络连接，确认播客是否公开访问，尝试重新登录。
 
 **Q: 为什么下载的文件大小只有0.01MB？**  
 A: 请检查登录账号对相关内容的访问权限，若无购买则为0.01MB。

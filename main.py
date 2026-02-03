@@ -4,7 +4,8 @@
 
 使用示例:
   python main.py                                               # 交互式模式
-  python main.py --login                                       # 手机号登录
+  python main.py --login                                       # 交互式输入 refresh_token 登录
+  python main.py --refresh-token <token>                       # 命令行传入 refresh_token 登录
   python main.py 682c566cc7c5f17595635a2c                    # 基本下载
   python main.py https://www.xiaoyuzhoufm.com/podcast/6603ea352d9eae5d0a5f9151  # 播客URL下载
   python main.py https://www.xiaoyuzhoufm.com/episode/6888a0148e06fe8de74811af  # 单集URL下载
@@ -38,7 +39,8 @@ def create_parser() -> argparse.ArgumentParser:
         epilog="""
 使用示例:
   python main.py                                               # 交互式模式
-  python main.py --login                                       # 手机号登录  
+  python main.py --login                                       # 交互式输入 refresh_token 登录
+  python main.py --refresh-token <token>                       # 命令行传入 refresh_token 登录
   python main.py 682c566cc7c5f17595635a2c                    # 基本下载
   python main.py https://www.xiaoyuzhoufm.com/podcast/6603ea352d9eae5d0a5f9151  # 播客URL下载
   python main.py https://www.xiaoyuzhoufm.com/episode/6888a0148e06fe8de74811af  # 单集URL下载
@@ -49,7 +51,9 @@ def create_parser() -> argparse.ArgumentParser:
 """)
 
     parser.add_argument('input', nargs='?', help='播客PID、单集EID或URL（播客的唯一标识符或网址）')
-    parser.add_argument('--login', action='store_true', help='使用手机号登录')
+    parser.add_argument('--login', action='store_true', help='使用 refresh_token 和 device_id 登录')
+    parser.add_argument('--refresh-token', help='直接提供 refresh_token 进行认证（需配合 --device-id）')
+    parser.add_argument('--device-id', help='与 refresh_token 绑定的 device_id（x-jike-device-id）')
     parser.add_argument('--max-episodes', type=int, help='最大下载单集数量')
     parser.add_argument('--from-json', help='从指定JSON文件下载')
     parser.add_argument('--save-only', action='store_true', help='仅保存JSON数据，不下载文件')
@@ -199,10 +203,26 @@ def interactive_mode():
         return False
 
 
-def handle_login() -> bool:
+def handle_login(refresh_token: str = None, device_id: str = None) -> bool:
     """处理登录流程"""
     try:
         auth = XiaoyuzhouAuth()
+
+        if refresh_token and device_id:
+            print("🔑 正在使用提供的 refresh_token 和 device_id 登录...")
+            result = auth.login_with_refresh_token(refresh_token, device_id)
+            if result["success"]:
+                print("✅ 登录成功！")
+                auth.save_credentials()
+                return True
+            else:
+                print(f"❌ 登录失败: {result.get('error', '未知错误')}")
+                return False
+        elif refresh_token:
+            print("❌ 使用 --refresh-token 时必须同时提供 --device-id")
+            print("💡 示例: python main.py --refresh-token <token> --device-id <device_id>")
+            return False
+
         if auth.interactive_login():
             print("🎉 登录成功！现在可以使用其他功能了")
             return True
@@ -274,7 +294,6 @@ def handle_download(args) -> bool:
 
         # 输出结果
         if result:
-            print(json.dumps(result, ensure_ascii=False, indent=2))
             return True
         else:
             print("❌ 操作失败")
@@ -296,8 +315,8 @@ def main():
     print("", file=sys.stderr)
 
     # 处理登录请求
-    if args.login:
-        success = handle_login()
+    if args.login or args.refresh_token:
+        success = handle_login(args.refresh_token)
         sys.exit(0 if success else 1)
 
     # 如果没有提供任何参数，进入交互式模式
