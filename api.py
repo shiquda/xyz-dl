@@ -75,22 +75,22 @@ class XiaoyuzhouAPI:
         """获取默认请求头"""
         now = datetime.now()
         local_time = now.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + "+0800"
-        
+
         return {
             "Host": "api.xiaoyuzhoufm.com",
-            "User-Agent": "okhttp/4.12.0",
             "os": "android",
-            "os-version": "32",
-            "manufacturer": "vivo",
-            "model": "V2366GA",
+            "os-version": "28",
+            "manufacturer": "Xiaomi",
+            "model": "MI 6",
             "resolution": "1080x1920",
-            "market": "update",
+            "market": "xiaomi",
             "applicationid": "app.podcast.cosmos",
-            "app-version": "2.91.0",
-            "app-buildno": "1305",
-            "webviewversion": "101.0.4951.61",
+            "app-version": "2.99.1",
+            "app-buildno": "1362",
+            "webviewversion": "138.0.7204.179",
+            "User-Agent": "Xiaoyuzhou/2.99.1(android 28)",
             "app-permissions": "100100",
-            "wificonnected": "true",
+            "wificonnected": "false",
             "timezone": "Asia/Shanghai",
             "local-time": local_time,
             "content-type": "application/json;charset=utf-8",
@@ -101,16 +101,16 @@ class XiaoyuzhouAPI:
     def get_sendcode_headers(self) -> Dict[str, str]:
         """获取发送验证码专用请求头"""
         headers = self.get_default_headers()
-        
+
         if self.device_id:
             headers['x-jike-device-id'] = self.device_id
-            
+
             try:
                 from utils import get_android_device_properties
                 headers['x-jike-device-properties'] = get_android_device_properties(self.device_id)
             except ImportError:
                 pass
-                
+
         return headers
 
     def send_sms_code(self, mobile_phone: str, area_code: str = "+86", captcha_token: Optional[str] = None) -> Dict[str, Any]:
@@ -122,7 +122,7 @@ class XiaoyuzhouAPI:
             "mobilePhoneNumber": mobile_phone,
             "areaCode": area_code
         }
-        
+
         if captcha_token:
             payload["captchaVerifyParam"] = captcha_token
 
