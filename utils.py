@@ -3,9 +3,10 @@
 """
 import re
 import uuid
+import json
 from pathlib import Path
 from urllib.parse import urlparse
-from typing import Optional
+from typing import Optional, Any, Dict, List
 
 
 def sanitize_filename(filename: str, max_length: int = 200) -> str:
@@ -154,3 +155,91 @@ def is_valid_podcast_id(podcast_id: str) -> bool:
         return False
     # 播客ID通常是24位的十六进制字符串
     return bool(re.match(r'^[0-9a-f]{24}$', podcast_id))
+
+
+def get_display_width(s: str) -> int:
+    """计算字符串在终端中的显示宽度，考虑中文字符"""
+    width = 0
+    for char in str(s):
+        # 基本判断：中文字符通常占用两个单元格
+        if ord(char) > 0x4e00 and ord(char) < 0x9fa5:
+            width += 2
+        else:
+            width += 1
+    return width
+
+
+def print_table(headers: list[str], rows: list[list[Any]]) -> None:
+    """在终端打印格式化的表格"""
+    if not rows:
+        # 如果没有数据，只打印表头
+        widths = [get_display_width(h) for h in headers]
+        header_line = " | ".join(f"{h}" + " " * (widths[i] - get_display_width(h)) for i, h in enumerate(headers))
+        print(header_line)
+        print("-" * (sum(widths) + 3 * (len(headers) - 1)))
+        return
+
+    # 计算每列的最大宽度
+    widths = [get_display_width(h) for h in headers]
+    for row in rows:
+        for i, val in enumerate(row):
+            widths[i] = max(widths[i], get_display_width(val))
+
+    # 打印表头
+    header_parts = []
+    for i, h in enumerate(headers):
+        padding = " " * (widths[i] - get_display_width(h))
+        header_parts.append(f"{h}{padding}")
+    print(" | ".join(header_parts))
+
+    # 打印分隔线
+    print("-" * (sum(widths) + 3 * (len(headers) - 1)))
+
+    # 打印行
+    for row in rows:
+        row_parts = []
+        for i, val in enumerate(row):
+            padding = " " * (widths[i] - get_display_width(val))
+            row_parts.append(f"{val}{padding}")
+        print(" | ".join(row_parts))
+
+
+def save_metadata_files(metadata: Dict[str, Any], output_dir: Path, filename_base: str) -> None:
+    """将元数据保存为JSON和Markdown格式"""
+    # 确保输出目录存在
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # 保存为 JSON
+    json_path = output_dir / f"{filename_base}.json"
+    with open(json_path, 'w', encoding='utf-8') as f:
+        json.dump(metadata, f, ensure_ascii=False, indent=2)
+    
+    # 保存为 Markdown
+    md_path = output_dir / f"{filename_base}.md"
+    with open(md_path, 'w', encoding='utf-8') as f:
+        f.write(f"# {metadata.get('title', filename_base)}\n\n")
+        
+        # 基本信息表格
+        f.write("## 基本信息\n\n")
+        f.write("| 属性 | 内容 |\n")
+        f.write("| --- | --- |\n")
+        
+        # 提取关键字段
+        fields = {
+            "作者/播客": metadata.get("author") or metadata.get("podcast", {}).get("title"),
+            "发布日期": metadata.get("pubDate"),
+            "时长": f"{metadata.get('duration', 0) // 60} 分钟" if metadata.get('duration') else None,
+            "播放量": metadata.get("playCount"),
+            "ID": metadata.get("eid") or metadata.get("pid")
+        }
+        
+        for key, value in fields.items():
+            if value is not None:
+                f.write(f"| {key} | {value} |\n")
+        
+        # 简介/描述
+        description = metadata.get("description") or metadata.get("brief")
+        if description:
+            f.write("\n## 简介\n\n")
+            f.write(description)
+            f.write("\n")

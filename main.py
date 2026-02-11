@@ -12,7 +12,7 @@
   python main.py 682c566cc7c5f17595635a2c --max-episodes 50  # 限制下载数量
   python main.py 682c566cc7c5f17595635a2c --output /path/to/download  # 指定下载目录
   python main.py 682c566cc7c5f17595635a2c --save-only        # 仅保存JSON，不下载
-  python main.py --from-json data/682c566cc7c5f17595635a2c.json  # 从JSON文件下载
+  python main.py --from-json download/PodcastName/682c566cc7c5f17595635a2c.json  # 从JSON文件下载
 
 """
 import argparse
@@ -38,16 +38,17 @@ def create_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 使用示例:
-  python main.py                                               # 交互式模式
-  python main.py --login                                       # 交互式输入 refresh_token 登录
-  python main.py --refresh-token <token>                       # 命令行传入 refresh_token 登录
-  python main.py 682c566cc7c5f17595635a2c                    # 基本下载
+  python main.py                                                                # 交互式模式
+  python main.py --login                                                        # 交互式输入 refresh_token 登录
+  python main.py --refresh-token <token>                                        # 命令行传入 refresh_token 登录
+  python main.py 682c566cc7c5f17595635a2c                                       # 基本下载
   python main.py https://www.xiaoyuzhoufm.com/podcast/6603ea352d9eae5d0a5f9151  # 播客URL下载
   python main.py https://www.xiaoyuzhoufm.com/episode/6888a0148e06fe8de74811af  # 单集URL下载
-  python main.py 682c566cc7c5f17595635a2c --max-episodes 50  # 限制下载数量
-  python main.py 682c566cc7c5f17595635a2c -o /path/to/download  # 指定下载目录
-  python main.py 682c566cc7c5f17595635a2c --save-only        # 仅保存JSON，不下载
-  python main.py --from-json data/682c566cc7c5f17595635a2c.json  # 从JSON文件下载
+  python main.py 682c566cc7c5f17595635a2c --max-episodes 50                     # 限制下载数量
+  python main.py 682c566cc7c5f17595635a2c -o /path/to/download                  # 指定下载目录
+  python main.py 682c566cc7c5f17595635a2c --save-only                           # 仅保存JSON，不下载
+  python main.py 682c566cc7c5f17595635a2c --save-only --with-subtitles          # 保存JSON，下载字幕，不下载音频
+  python main.py --from-json data/682c566cc7c5f17595635a2c.json                 # 从JSON文件下载
 """)
 
     parser.add_argument('input', nargs='?', help='播客PID、单集EID或URL（播客的唯一标识符或网址）')
@@ -57,6 +58,9 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument('--max-episodes', type=int, help='最大下载单集数量')
     parser.add_argument('--from-json', help='从指定JSON文件下载')
     parser.add_argument('--save-only', action='store_true', help='仅保存JSON数据，不下载文件')
+    parser.add_argument('--with-subtitles', action='store_true', help='同时也下载字幕文件（如果有）')
+    parser.add_argument('--info', action='store_true', help='显示详细信息（播客、主播或单集），不下载')
+    parser.add_argument('--no-metadata', action='store_true', help='不保存元数据文件（JSON/MD）')
     parser.add_argument('--output', '-o', help='指定下载目录 (默认: download)')
 
     return parser
@@ -120,13 +124,33 @@ def interactive_mode():
 
         # 获取下载选项
         print("\n🔧 下载选项:")
+        print("   1. 开始下载")
+        print("   2. 仅保存JSON")
+        print("   3. 查看详细信息")
+        
+        choice = input("\n请选择操作 (默认 1): ").strip()
+        
+        save_only = False
+        if choice == "2":
+            save_only = True
+        elif choice == "3":
+            downloader = XiaoyuzhouDownloader(auth=auth)
+            return downloader.display_info(input_type, extracted_id)
+
+        # 询问是否下载字幕
+        with_subtitles = False
+        sub_input = input("是否下载字幕 (y/N): ").strip().lower()
+        if sub_input == 'y':
+            with_subtitles = True
+            print("📝 将下载字幕文件")
 
         # 如果是单集，跳过其他选项
         if input_type == "episode":
-            print("📻 检测到单集URL，将直接下载该单集")
-
-            # 开始下载
-            print(f"\n🚀 开始下载单集...")
+            if save_only:
+                print(f"\n🚀 开始保存单集数据...")
+            else:
+                print("📻 检测到单集URL，将直接下载该单集")
+                print(f"\n🚀 开始下载单集...")
 
             try:
                 downloader = XiaoyuzhouDownloader(auth=auth)
@@ -134,7 +158,7 @@ def interactive_mode():
                     print("❌ 创建下载器失败")
                     return False
 
-                result = downloader.download_single_episode(extracted_id)
+                result = downloader.download_single_episode(extracted_id, save_only=save_only, with_subtitles=with_subtitles)
 
                 if result and result.get('success'):
                     print("\n🎉 操作完成!")
@@ -158,15 +182,19 @@ def interactive_mode():
             except ValueError:
                 print("⚠️ 集数格式不正确，将下载所有集数")
 
-        # 是否仅保存JSON
-        save_only = False
-
         # 下载目录设置
         download_dir = None
         dir_input = input(f"下载目录 (默认 {config.download_dir}): ").strip()
         if dir_input:
             download_dir = dir_input
             print(f"📁 将下载到: {download_dir}")
+        
+        # 元数据保存设置
+        save_metadata = True
+        meta_input = input("是否保存元数据 JSON/MD (Y/n): ").strip().lower()
+        if meta_input == 'n':
+            save_metadata = False
+            print("🚫 将不保存元数据文件")
 
         # 开始下载
         print(f"\n🚀 开始{'保存数据' if save_only else '下载'}...")
@@ -176,15 +204,15 @@ def interactive_mode():
             if download_dir:
                 config.set_download_dir(download_dir)
 
-            downloader = XiaoyuzhouDownloader(auth=auth)
+            downloader = XiaoyuzhouDownloader(auth=auth, save_metadata=save_metadata)
             if not downloader:
                 print("❌ 创建下载器失败")
                 return False
 
             if save_only:
-                result = downloader.save_only(extracted_id, max_episodes)
+                result = downloader.save_only(extracted_id, max_episodes, with_subtitles=with_subtitles)
             else:
-                result = downloader.download(extracted_id, max_episodes)
+                result = downloader.download(extracted_id, max_episodes, with_subtitles=with_subtitles)
 
             if result:
                 print("\n🎉 操作完成!")
@@ -246,7 +274,7 @@ def handle_download(args) -> bool:
         auth = XiaoyuzhouAuth()
 
         # 创建下载器实例
-        downloader = XiaoyuzhouDownloader(auth=auth)
+        downloader = XiaoyuzhouDownloader(auth=auth, save_metadata=not args.no_metadata)
 
         if not downloader:
             print("❌ 创建下载器失败，请检查认证状态")
@@ -256,7 +284,7 @@ def handle_download(args) -> bool:
         if args.from_json:
             # 从JSON文件下载
             print(f"🚀 从JSON文件下载: {args.from_json}", file=sys.stderr)
-            result = downloader.download_from_json(args.from_json)
+            result = downloader.download_from_json(args.from_json, with_subtitles=args.with_subtitles)
         else:
             # 检测输入类型并提取ID
             input_type, extracted_id = detect_input_type(args.input)
@@ -274,23 +302,28 @@ def handle_download(args) -> bool:
 
             print(f"✅ 识别到{input_type}: {extracted_id}", file=sys.stderr)
 
+            # 如果只是查看信息
+            if args.info:
+                return downloader.display_info(input_type, extracted_id)
+
             # 如果是单集，使用单集下载方法
             if input_type == "episode":
                 print(f"🚀 开始下载单集: {extracted_id}", file=sys.stderr)
-                result = downloader.download_single_episode(extracted_id)
+                # 单集下载支持 --save-only 和 --with-subtitles
+                result = downloader.download_single_episode(extracted_id, save_only=args.save_only, with_subtitles=args.with_subtitles)
             elif args.save_only:
                 # 仅保存JSON
                 print(f"🚀 仅保存JSON数据: {extracted_id}", file=sys.stderr)
                 if args.max_episodes:
                     print(f"📊 限制数量: {args.max_episodes} 个单集", file=sys.stderr)
-                result = downloader.save_only(extracted_id, args.max_episodes)
+                result = downloader.save_only(extracted_id, args.max_episodes, with_subtitles=args.with_subtitles)
             else:
                 # 正常下载播客
                 print(f"🚀 开始下载播客: {extracted_id}", file=sys.stderr)
                 if args.max_episodes:
                     print(f"📊 限制数量: {args.max_episodes} 个单集", file=sys.stderr)
 
-                result = downloader.download(extracted_id, args.max_episodes)
+                result = downloader.download(extracted_id, args.max_episodes, with_subtitles=args.with_subtitles)
 
         # 输出结果
         if result:
