@@ -281,6 +281,22 @@ class XiaoyuzhouAPI:
         except requests.RequestException as e:
             return {"success": False, "error": str(e)}
 
+    def get_episode_transcript(self, eid: str, media_id: str) -> Dict[str, Any]:
+        """获取单集字幕（transcript）信息"""
+        url = f"{self.base_url}/v1/episode-transcript/get"
+        
+        payload = {
+            "eid": eid,
+            "mediaId": media_id
+        }
+        
+        try:
+            response = self._make_request_with_retry("POST", url, json=payload)
+            response.raise_for_status()
+            return {"success": True, "data": response.json()}
+        except requests.RequestException as e:
+            return {"success": False, "error": str(e)}
+
     def update_credentials(self, access_token: str, device_id: str):
         """更新认证信息"""
         self.access_token = access_token
