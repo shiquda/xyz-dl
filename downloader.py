@@ -18,19 +18,20 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 try:
     from .auth import XiaoyuzhouAuth
     from .config import config
-    from .utils import sanitize_filename, format_size, get_file_extension, create_directory
+    from .utils import sanitize_filename, format_size, get_file_extension, create_directory, print_table, save_metadata_files
 except ImportError:
     # 如果作为独立模块运行
     from auth import XiaoyuzhouAuth
     from config import config
-    from utils import sanitize_filename, format_size, get_file_extension, create_directory
+    from utils import sanitize_filename, format_size, get_file_extension, create_directory, print_table, save_metadata_files
 
 
 class XiaoyuzhouDownloader:
     """小宇宙播客下载器"""
 
-    def __init__(self, auth: Optional[XiaoyuzhouAuth] = None):
+    def __init__(self, auth: Optional[XiaoyuzhouAuth] = None, save_metadata: bool = True):
         self.auth = auth or XiaoyuzhouAuth()
+        self.save_metadata_enabled = save_metadata
 
         # 确保认证
         if not self.auth.ensure_authenticated():
@@ -171,9 +172,15 @@ class XiaoyuzhouDownloader:
             progress_bar.close()
             raise e
 
-    def save_data_json(self, pid: str, episodes_data: Dict[str, Any]) -> Path:
+    def save_data_json(self, pid: str, episodes_data: Dict[str, Any], podcast_title: Optional[str] = None) -> Path:
         """保存JSON数据到data目录，以ID命名"""
-        data_dir = create_directory(config.data_dir)
+        if podcast_title:
+            safe_title = sanitize_filename(podcast_title)
+            data_dir = config.download_dir / safe_title / "data"
+        else:
+            data_dir = config.data_dir
+            
+        data_dir = create_directory(data_dir)
         data_file = data_dir / f"{pid}.json"
 
         with open(data_file, 'w', encoding='utf-8') as f:
@@ -394,7 +401,11 @@ class XiaoyuzhouDownloader:
         )
 
         # 保存元数据
-        metadata_file = self.save_metadata(podcast_info, episode_metadata, download_dir)
+        metadata_file = None
+        if self.save_metadata_enabled:
+            metadata_file = self.save_metadata(podcast_info, episode_metadata, download_dir)
+            # 保存详细元数据文件 (JSON 和 Markdown)
+            save_metadata_files(podcast_info, download_dir, "podcast_metadata")
 
         # 显示下载总结
         print(f"\n📊 下载完成!", file=sys.stderr)
@@ -421,6 +432,10 @@ class XiaoyuzhouDownloader:
     def save_only(self, pid: str, max_episodes: Optional[int] = None) -> Dict[str, Any]:
         """仅保存JSON数据，不下载文件"""
         episodes = self.get_all_episodes(pid, max_episodes)
+        
+        podcast_title = None
+        if episodes:
+            podcast_title = episodes[0].get('podcast', {}).get('title')
 
         # 保存JSON数据到data目录
         json_data = {
@@ -429,7 +444,7 @@ class XiaoyuzhouDownloader:
             "fetch_time": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             "total_count": len(episodes)
         }
-        data_file = self.save_data_json(pid, json_data)
+        data_file = self.save_data_json(pid, json_data, podcast_title)
 
         return {
             "pid": pid,
@@ -441,6 +456,10 @@ class XiaoyuzhouDownloader:
     def download(self, pid: str, max_episodes: Optional[int] = None) -> Dict[str, Any]:
         """主下载方法"""
         episodes = self.get_all_episodes(pid, max_episodes)
+        
+        podcast_title = None
+        if episodes:
+            podcast_title = episodes[0].get('podcast', {}).get('title')
 
         # 保存JSON数据到data目录
         json_data = {
@@ -449,12 +468,12 @@ class XiaoyuzhouDownloader:
             "fetch_time": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             "total_count": len(episodes)
         }
-        self.save_data_json(pid, json_data)
+        self.save_data_json(pid, json_data, podcast_title)
 
         result = self.download_podcast(episodes)
         return result
 
-    def download_single_episode(self, eid: str) -> Dict[str, Any]:
+    def download_single_episode(self, eid: str, save_only: bool = False) -> Dict[str, Any]:
         """下载单个单集"""
         print(f"🚀 开始获取单集信息: {eid}", file=sys.stderr)
 
@@ -515,7 +534,9 @@ class XiaoyuzhouDownloader:
 
         # 创建下载目录（使用播客名称）
         download_dir = self.create_download_directory(podcast_title)
-        print(f"📁 下载目录: {download_dir.absolute()}", file=sys.stderr)
+        
+        if not save_only:
+            print(f"📁 下载目录: {download_dir.absolute()}", file=sys.stderr)
 
         # 生成文件名
         safe_title = sanitize_filename(episode_title)
@@ -523,12 +544,17 @@ class XiaoyuzhouDownloader:
         filename = f"{safe_title}{file_extension}"
         filepath = download_dir / filename
 
-        # 下载文件
-        print(f"⬇️ 开始下载: {filename}", file=sys.stderr)
-        success = self.download_file(enclosure_url, filepath, episode_title, 1)
+        success = True
+        if not save_only:
+            # 下载文件
+            print(f"⬇️ 开始下载: {filename}", file=sys.stderr)
+            success = self.download_file(enclosure_url, filepath, episode_title, 1)
+        else:
+            print(f"💾 仅保存元数据", file=sys.stderr)
 
         if success:
-            print(f"✅ 下载完成: {filepath.absolute()}", file=sys.stderr)
+            if not save_only:
+                print(f"✅ 下载完成: {filepath.absolute()}", file=sys.stderr)
 
             # 保存单集元数据
             episode_metadata = {
@@ -541,13 +567,17 @@ class XiaoyuzhouDownloader:
                 "description": episode_data.get('description', ''),
                 "podcast": podcast_info,
                 "download_time": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                "downloaded": True
+                "downloaded": not save_only
             }
 
-            # 保存元数据到文件
-            metadata_file = download_dir / f"{safe_title}_metadata.json"
-            with open(metadata_file, 'w', encoding='utf-8') as f:
-                json.dump(episode_metadata, f, ensure_ascii=False, indent=2)
+            if self.save_metadata_enabled:
+                # 保存元数据到文件
+                metadata_file = download_dir / f"{safe_title}_metadata.json"
+                with open(metadata_file, 'w', encoding='utf-8') as f:
+                    json.dump(episode_metadata, f, ensure_ascii=False, indent=2)
+
+                # 保存详细元数据文件 (JSON 和 Markdown)
+                save_metadata_files(episode_metadata, download_dir, f"{safe_title}_metadata")
 
             return {
                 "episode_title": episode_title,
@@ -576,3 +606,83 @@ class XiaoyuzhouDownloader:
 
         result = self.download_podcast(episodes)
         return result
+
+    def display_podcast_info(self, podcast_info: Dict[str, Any]):
+        """显示播客信息表格"""
+        headers = ["属性", "内容"]
+        rows = [
+            ["播客名称", podcast_info.get("title", "N/A")],
+            ["作者", podcast_info.get("author", "N/A")],
+            ["单集总数", podcast_info.get("episodeCount", "N/A")],
+            ["订阅人数", podcast_info.get("subscriptionCount", "N/A")],
+            ["简介", podcast_info.get("brief", "N/A")]
+        ]
+        print("\n🎧 播客详细信息:")
+        print_table(headers, rows)
+
+    def display_host_info(self, podcasters: List[Dict[str, Any]]):
+        """显示主播信息表格"""
+        if not podcasters:
+            print("\n🎙️ 未找到主播信息")
+            return
+        
+        headers = ["昵称", "IP属地", "个人简介"]
+        rows = []
+        for host in podcasters:
+            rows.append([
+                host.get("nickname", "N/A"),
+                host.get("ipLoc", "N/A"),
+                host.get("bio", "N/A")
+            ])
+        print("\n🎙️ 主播/嘉宾信息:")
+        print_table(headers, rows)
+
+    def display_episode_info(self, episode_data: Dict[str, Any]):
+        """显示单集信息表格"""
+        headers = ["属性", "内容"]
+        duration_min = episode_data.get("duration", 0) // 60
+        rows = [
+            ["单集标题", episode_data.get("title", "N/A")],
+            ["时长", f"{duration_min} 分钟"],
+            ["发布日期", episode_data.get("pubDate", "N/A")],
+            ["播放量", episode_data.get("playCount", "N/A")],
+            ["点赞数", episode_data.get("clapCount", "N/A")],
+            ["评论数", episode_data.get("commentCount", "N/A")]
+        ]
+        print("\n📻 单集详细信息:")
+        print_table(headers, rows)
+
+    def display_info(self, input_type: str, extracted_id: str) -> bool:
+        """根据输入类型显示详细信息"""
+        if input_type == "episode":
+            result = self.api.get_episode_info(extracted_id)
+            if not result["success"]:
+                print(f"❌ 获取单集信息失败: {result['error']}")
+                return False
+            
+            data = result["data"]["data"]
+            self.display_episode_info(data)
+            self.display_podcast_info(data.get("podcast", {}))
+            self.display_host_info(data.get("podcast", {}).get("podcasters", []))
+            return True
+        
+        elif input_type == "podcast":
+            # 我们需要先获取播客的第一个单集来获取播客详情
+            # 或者如果有专门的播客详情接口更好
+            # 目前 XiaoyuzhouAPI 只有 get_episodes_page
+            result = self.api.get_episodes_page(extracted_id, limit=1)
+            if not result["success"]:
+                print(f"❌ 获取播客信息失败: {result['error']}")
+                return False
+            
+            episodes = result["data"].get("data", [])
+            if not episodes:
+                print("❌ 未找到该播客的任何信息")
+                return False
+            
+            podcast_info = episodes[0].get("podcast", {})
+            self.display_podcast_info(podcast_info)
+            self.display_host_info(podcast_info.get("podcasters", []))
+            return True
+        
+        return False
