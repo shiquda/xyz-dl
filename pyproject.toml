@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "xyz-dl"
 version = "0.1.0"
@@ -7,4 +11,15 @@ requires-python = ">=3.13"
 dependencies = [
     "requests>=2.32.4",
     "tqdm>=4.66.0",
+]
+
+[project.scripts]
+xyz-dl = "main:main"
+
+[tool.setuptools]
+py-modules = ["main", "auth", "api", "config", "downloader", "utils"]
+
+[dependency-groups]
+dev = [
+    "pyinstaller>=6.18.0",
 ]
