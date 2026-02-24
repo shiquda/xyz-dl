@@ -67,6 +67,9 @@ python main.py 682c566cc7c5f17595635a2c --output /path/to/download
 
 # 仅保存元数据，不下载文件
 python main.py 682c566cc7c5f17595635a2c --save-only
+
+# 仅保存元数据和字幕，不下载音频
+python main.py 682c566cc7c5f17595635a2c --save-only --with-subtitles
 ```
 
 ### 获取播客链接
@@ -78,15 +81,17 @@ python main.py 682c566cc7c5f17595635a2c --save-only
 
 ## 🔧 命令行参数
 
-| 参数 | 说明 | 示例 |
-|------|------|------|
-| `--login` | 交互式登录 | `python main.py --login` |
-| `--refresh-token` | 指定 refresh_token（需配合 --device-id） | `--refresh-token <token>` |
-| `--device-id` | 指定 device_id | `--device-id <device_id>` |
-| `--max-episodes` | 最大下载集数 | `--max-episodes 50` |
-| `--output, -o` | 下载目录 | `--output /path/to/download` |
-| `--save-only` | 仅保存数据，不下载 | `--save-only` |
-| `--from-json` | 从JSON文件下载 | `--from-json data/podcast.json` |
+| 参数                | 说明                                | 示例                              |
+|--------------------|-----------------------------------|---------------------------------|
+| `--login`          | 交互式登录                             | `python main.py --login`        |
+| `--refresh-token`  | 指定 refresh_token（需配合 --device-id） | `--refresh-token <token>`       |
+| `--device-id`      | 指定 device_id                      | `--device-id <device_id>`       |
+| `--max-episodes`   | 最大下载集数                            | `--max-episodes 50`             |
+| `--output, -o`     | 下载目录                              | `--output /path/to/download`    |
+| `--save-only`      | 仅保存数据，不下载                         | `--save-only`                   |
+| `--from-json`      | 从JSON文件下载                         | `--from-json data/podcast.json` |
+| `--with-subtitles` | 下载字幕                              | `--save-only --with-subtitles`  |
+
 
 ## 📁 项目结构
 

@@ -25,7 +25,6 @@ class Config:
             "download": {
                 "chunk_size": 8192,
                 "download_dir": "download",
-                "data_dir": "data",
                 "max_retries": 3,
                 "retry_delay": 2,
                 "timeout": 60
@@ -114,10 +113,6 @@ class Config:
         if hasattr(self, '_custom_download_dir'):
             return self._custom_download_dir
         return Path(self.get('download.download_dir'))
-
-    @property
-    def data_dir(self) -> Path:
-        return Path(self.get('download.data_dir'))
 
     @property
     def api_timeout(self) -> int:
