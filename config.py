@@ -120,7 +120,11 @@ class Config:
 
     @property
     def credentials_file(self) -> Path:
-        return self.config_dir / self.get('auth.credentials_file')
+        """凭据文件路径：优先当前目录，否则使用 ~/.xyz-dl/"""
+        local = self.config_dir / self.get('auth.credentials_file')
+        if local.exists():
+            return local
+        return Path.home() / '.xyz-dl' / self.get('auth.credentials_file')
 
 
 # 全局配置实例
