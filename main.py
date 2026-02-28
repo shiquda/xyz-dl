@@ -349,7 +349,7 @@ def main():
 
     # 处理登录请求
     if args.login or args.refresh_token:
-        success = handle_login(args.refresh_token)
+        success = handle_login(args.refresh_token, args.device_id)
         sys.exit(0 if success else 1)
 
     # 如果没有提供任何参数，进入交互式模式
