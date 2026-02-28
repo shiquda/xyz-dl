@@ -47,7 +47,7 @@ def create_parser() -> argparse.ArgumentParser:
   python main.py 682c566cc7c5f17595635a2c --max-episodes 50                     # 限制下载数量
   python main.py 682c566cc7c5f17595635a2c -o /path/to/download                  # 指定下载目录
   python main.py 682c566cc7c5f17595635a2c --save-only                           # 仅保存JSON，不下载
-  python main.py 682c566cc7c5f17595635a2c --save-only --with-subtitles          # 保存JSON，下载字幕，不下载音频
+  python main.py 682c566cc7c5f17595635a2c --save-only --subtitles          # 保存JSON，下载字幕（txt），不下载音频
   python main.py --from-json data/682c566cc7c5f17595635a2c.json                 # 从JSON文件下载
 """)
 
@@ -58,7 +58,9 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument('--max-episodes', type=int, help='最大下载单集数量')
     parser.add_argument('--from-json', help='从指定JSON文件下载')
     parser.add_argument('--save-only', action='store_true', help='仅保存JSON数据，不下载文件')
-    parser.add_argument('--with-subtitles', action='store_true', help='同时也下载字幕文件（如果有）')
+    parser.add_argument('--no-audio', action='store_true', help='不下载音频文件（可与 --subtitles 组合，仅下载字幕）')
+    parser.add_argument('--subtitles', nargs='?', const='txt', choices=['txt', 'srt'], metavar='FORMAT', help='下载字幕文件（FORMAT: txt 纯文本（默认）, srt 带时间轴）')
+    parser.add_argument('--with-subtitles', action='store_true', help='兼容旧参数：等同于 --subtitles txt')
     parser.add_argument('--info', action='store_true', help='显示详细信息（播客、主播或单集），不下载')
     parser.add_argument('--no-metadata', action='store_true', help='不保存元数据文件（JSON/MD）')
     parser.add_argument('--output', '-o', help='指定下载目录 (默认: download)')
@@ -138,11 +140,11 @@ def interactive_mode():
             return downloader.display_info(input_type, extracted_id)
 
         # 询问是否下载字幕
-        with_subtitles = False
-        sub_input = input("是否下载字幕 (y/N): ").strip().lower()
-        if sub_input == 'y':
-            with_subtitles = True
-            print("📝 将下载字幕文件")
+        subtitle_format = None
+        sub_input = input("是否下载字幕 (N/txt/srt): ").strip().lower()
+        if sub_input in ('txt', 'srt'):
+            subtitle_format = sub_input
+            print(f"📝 将下载字幕文件（{sub_input}格式）")
 
         # 如果是单集，跳过其他选项
         if input_type == "episode":
@@ -158,7 +160,7 @@ def interactive_mode():
                     print("❌ 创建下载器失败")
                     return False
 
-                result = downloader.download_single_episode(extracted_id, save_only=save_only, with_subtitles=with_subtitles)
+                result = downloader.download_single_episode(extracted_id, save_only=save_only, subtitle_format=subtitle_format)
 
                 if result and result.get('success'):
                     print("\n🎉 操作完成!")
@@ -210,9 +212,9 @@ def interactive_mode():
                 return False
 
             if save_only:
-                result = downloader.save_only(extracted_id, max_episodes, with_subtitles=with_subtitles)
+                result = downloader.save_only(extracted_id, max_episodes, subtitle_format=subtitle_format)
             else:
-                result = downloader.download(extracted_id, max_episodes, with_subtitles=with_subtitles)
+                result = downloader.download(extracted_id, max_episodes, subtitle_format=subtitle_format)
 
             if result:
                 print("\n🎉 操作完成!")
@@ -280,11 +282,21 @@ def handle_download(args) -> bool:
             print("❌ 创建下载器失败，请检查认证状态")
             return False
 
+        subtitle_format = args.subtitles
+        if subtitle_format is None and args.with_subtitles:
+            subtitle_format = 'txt'
+
+        no_audio_mode = args.no_audio or args.save_only
+
         # 根据参数执行不同的操作
         if args.from_json:
             # 从JSON文件下载
             print(f"🚀 从JSON文件下载: {args.from_json}", file=sys.stderr)
-            result = downloader.download_from_json(args.from_json, with_subtitles=args.with_subtitles)
+            result = downloader.download_from_json(
+                args.from_json,
+                subtitle_format=subtitle_format,
+                download_audio=not no_audio_mode
+            )
         else:
             # 检测输入类型并提取ID
             input_type, extracted_id = detect_input_type(args.input)
@@ -309,21 +321,24 @@ def handle_download(args) -> bool:
             # 如果是单集，使用单集下载方法
             if input_type == "episode":
                 print(f"🚀 开始下载单集: {extracted_id}", file=sys.stderr)
-                # 单集下载支持 --save-only 和 --with-subtitles
-                result = downloader.download_single_episode(extracted_id, save_only=args.save_only, with_subtitles=args.with_subtitles)
-            elif args.save_only:
+                result = downloader.download_single_episode(
+                    extracted_id,
+                    save_only=no_audio_mode,
+                    subtitle_format=subtitle_format
+                )
+            elif no_audio_mode:
                 # 仅保存JSON
                 print(f"🚀 仅保存JSON数据: {extracted_id}", file=sys.stderr)
                 if args.max_episodes:
                     print(f"📊 限制数量: {args.max_episodes} 个单集", file=sys.stderr)
-                result = downloader.save_only(extracted_id, args.max_episodes, with_subtitles=args.with_subtitles)
+                result = downloader.save_only(extracted_id, args.max_episodes, subtitle_format=subtitle_format)
             else:
                 # 正常下载播客
                 print(f"🚀 开始下载播客: {extracted_id}", file=sys.stderr)
                 if args.max_episodes:
                     print(f"📊 限制数量: {args.max_episodes} 个单集", file=sys.stderr)
 
-                result = downloader.download(extracted_id, args.max_episodes, with_subtitles=args.with_subtitles)
+                result = downloader.download(extracted_id, args.max_episodes, subtitle_format=subtitle_format)
 
         # 输出结果
         if result:

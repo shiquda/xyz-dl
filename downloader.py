@@ -19,12 +19,12 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 try:
     from .auth import XiaoyuzhouAuth
     from .config import config
-    from .utils import sanitize_filename, format_size, get_file_extension, create_directory, print_table, save_metadata_files
+    from .utils import sanitize_filename, format_size, get_file_extension, create_directory, print_table, save_metadata_files, transcript_to_srt
 except ImportError:
     # 如果作为独立模块运行
     from auth import XiaoyuzhouAuth
     from config import config
-    from utils import sanitize_filename, format_size, get_file_extension, create_directory, print_table, save_metadata_files
+    from utils import sanitize_filename, format_size, get_file_extension, create_directory, print_table, save_metadata_files, transcript_to_srt
 
 
 class XiaoyuzhouDownloader:
@@ -76,52 +76,45 @@ class XiaoyuzhouDownloader:
         download_dir = config.download_dir / safe_title
         return create_directory(download_dir)
 
-    def download_subtitle(self, transcript_url: str, filepath: Path) -> bool:
-        """下载字幕文件"""
+    def download_subtitle(self, transcript_url: str, filepath: Path, subtitle_format: str = 'txt') -> bool:
+        """下载字幕文件，支持 txt 和 srt 格式"""
         if not transcript_url:
             return False
-            
-        # 设置特定请求头
         headers = {
-            "Host": "transcript-highlight.xyzcdn.net",
+            "Host": transcript_url.split('/')[2],
             "Accept": "application/json",
             "User-Agent": "Xiaoyuzhou/2.99.1(android 28)"
         }
-        
         try:
             response = self.download_session.get(transcript_url, headers=headers, timeout=config.get('download.timeout', 60))
             response.raise_for_status()
-            
-            # 解析JSON并提取文本
             try:
                 data = response.json()
             except json.JSONDecodeError:
                 print(f"❌ 字幕不是有效的JSON格式", file=sys.stderr)
                 return False
 
-            content_lines = []
+            # 统一提取列表
+            items: list = []
             if isinstance(data, list):
-                for item in data:
-                    if isinstance(item, dict) and 'text' in item:
-                         content_lines.append(str(item['text']))
+                items = data
             elif isinstance(data, dict):
-                # 尝试查找列表字段
-                found_list = False
                 for key in ['data', 'segments', 'body', 'content', 'items']:
                     if key in data and isinstance(data[key], list):
-                        for item in data[key]:
-                            if isinstance(item, dict) and 'text' in item:
-                                content_lines.append(str(item['text']))
-                        found_list = True
+                        items = data[key]
                         break
-            
-            # 保存文件
-            with open(filepath, 'w', encoding='utf-8') as f:
-                f.write("\n".join(content_lines))
-                
-            print(f"📝 字幕下载成功: {filepath.name}", file=sys.stderr)
+
+            if subtitle_format == 'srt':
+                content = transcript_to_srt(items)
+                out_path = filepath.with_suffix('.srt')
+            else:
+                content = "\n".join(str(item['text']) for item in items if isinstance(item, dict) and 'text' in item)
+                out_path = filepath
+
+            with open(out_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            print(f"📝 字幕下载成功: {out_path.name}", file=sys.stderr)
             return True
-            
         except Exception as e:
             print(f"❌ 字幕下载失败: {e}", file=sys.stderr)
             return False
@@ -327,7 +320,13 @@ class XiaoyuzhouDownloader:
 
         return all_episodes
 
-    def download_episodes_sequential(self, episodes: List[Dict], download_dir: Path, with_subtitles: bool = False) -> tuple:
+    def download_episodes_sequential(
+        self,
+        episodes: List[Dict],
+        download_dir: Path,
+        subtitle_format: Optional[str] = None,
+        download_audio: bool = True
+    ) -> tuple:
         """单线程顺序下载单集"""
         success_count = 0
         episode_metadata = []
@@ -364,7 +363,7 @@ class XiaoyuzhouDownloader:
                         print(f"❌ [{i:03d}] 无访问权限，跳过: {episode_title}")
                         continue
 
-            if not enclosure_url:
+            if download_audio and not enclosure_url:
                 print(f"  ⚠️  [{i:03d}] 跳过: 无音频链接 - {episode_title}")
                 continue
 
@@ -373,7 +372,7 @@ class XiaoyuzhouDownloader:
             file_extension = get_file_extension(enclosure_url)
             filename = f"{i:03d}. {safe_title}{file_extension}"
             filepath = download_dir / filename
-            subtitle_filename = f"{safe_title}.txt"
+            subtitle_filename = f"{safe_title}.{subtitle_format or 'txt'}"
             subtitle_filepath = download_dir / subtitle_filename
 
             download_tasks.append({
@@ -395,18 +394,21 @@ class XiaoyuzhouDownloader:
         try:
             for task in download_tasks:
                 try:
-                    success = self.download_file(
-                        task['enclosure_url'],
-                        task['filepath'],
-                        task['episode_title'],
-                        task['episode_index']
-                    )
+                    if download_audio:
+                        success = self.download_file(
+                            task['enclosure_url'],
+                            task['filepath'],
+                            task['episode_title'],
+                            task['episode_index']
+                        )
+                    else:
+                        success = True
 
                     if success:
                         success_count += 1
                         
                         # 下载字幕
-                        if with_subtitles:
+                        if subtitle_format:
                             # 检查字幕是否已存在
                             if task['subtitle_filepath'].exists():
                                 print(f"  ⏩ 跳过已存在的字幕: {task['subtitle_filepath'].name}", file=sys.stderr)
@@ -422,7 +424,7 @@ class XiaoyuzhouDownloader:
                                             transcript_url = inner_data.get("transcriptUrl")
                                             
                                     if transcript_url:
-                                        self.download_subtitle(transcript_url, task['subtitle_filepath'])
+                                        self.download_subtitle(transcript_url, task['subtitle_filepath'], subtitle_format)
                                     else:
                                         print(f"  ⚠️  未找到字幕: {task['episode_title'][:40]}", file=sys.stderr)
                                 else:
@@ -453,7 +455,12 @@ class XiaoyuzhouDownloader:
 
         return success_count, episode_metadata
 
-    def download_podcast(self, episodes: List[Dict], with_subtitles: bool = False) -> Dict[str, Any]:
+    def download_podcast(
+        self,
+        episodes: List[Dict],
+        subtitle_format: Optional[str] = None,
+        download_audio: bool = True
+    ) -> Dict[str, Any]:
         """下载播客的所有单集"""
         if not episodes:
             print("没有找到单集数据")
@@ -477,7 +484,10 @@ class XiaoyuzhouDownloader:
 
         # 多线程下载
         success_count, episode_metadata = self.download_episodes_sequential(
-            episodes_reversed, download_dir, with_subtitles=with_subtitles
+            episodes_reversed,
+            download_dir,
+            subtitle_format=subtitle_format,
+            download_audio=download_audio
         )
 
         # 保存元数据
@@ -509,7 +519,7 @@ class XiaoyuzhouDownloader:
             "success_rate": f"{(success_count/total_count)*100:.1f}%" if total_count > 0 else "0%"
         }
 
-    def save_only(self, pid: str, max_episodes: Optional[int] = None, with_subtitles: bool = False) -> Dict[str, Any]:
+    def save_only(self, pid: str, max_episodes: Optional[int] = None, subtitle_format: Optional[str] = None) -> Dict[str, Any]:
         """仅保存JSON数据，不下载文件"""
         episodes = self.get_all_episodes(pid, max_episodes)
         
@@ -517,17 +527,18 @@ class XiaoyuzhouDownloader:
         if episodes:
             podcast_title = episodes[0].get('podcast', {}).get('title')
 
-        # 保存JSON数据到播客目录
         json_data = {
             "pid": pid,
             "episodes": episodes,
             "fetch_time": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             "total_count": len(episodes)
         }
-        data_file = self.save_data_json(pid, json_data, podcast_title)
+        data_file = None
+        if self.save_metadata_enabled:
+            data_file = self.save_data_json(pid, json_data, podcast_title)
         
         # 如果需要下载字幕
-        if with_subtitles and episodes:
+        if subtitle_format and episodes:
             print(f"📝 正在下载字幕...", file=sys.stderr)
             # 复用download_podcast的逻辑，但在download_episodes_sequential中如果不传enclosure_url或者修改逻辑...
             # 其实可以直接调用download_podcast，但是需要一种方式告诉它只下载字幕不下载音频
@@ -546,7 +557,7 @@ class XiaoyuzhouDownloader:
                 media_id = episode.get('media', {}).get('id')
                 
                 safe_title = sanitize_filename(episode_title)
-                subtitle_filename = f"{safe_title}.txt"
+                subtitle_filename = f"{safe_title}.{subtitle_format or 'txt'}"
                 subtitle_filepath = download_dir / subtitle_filename
 
                 # 检查字幕是否已存在
@@ -570,7 +581,7 @@ class XiaoyuzhouDownloader:
                             transcript_url = inner_data.get("transcriptUrl")
 
                     if transcript_url:
-                        if self.download_subtitle(transcript_url, subtitle_filepath):
+                        if self.download_subtitle(transcript_url, subtitle_filepath, subtitle_format):
                             count += 1
             
             print(f"📝 已下载 {count} 个字幕文件", file=sys.stderr)
@@ -578,11 +589,11 @@ class XiaoyuzhouDownloader:
         return {
             "pid": pid,
             "total_episodes": len(episodes),
-            "json_file": str(data_file.absolute()),
+            "json_file": str(data_file.absolute()) if data_file else None,
             "fetch_time": json_data["fetch_time"]
         }
 
-    def download(self, pid: str, max_episodes: Optional[int] = None, with_subtitles: bool = False) -> Dict[str, Any]:
+    def download(self, pid: str, max_episodes: Optional[int] = None, subtitle_format: Optional[str] = None) -> Dict[str, Any]:
         """主下载方法"""
         episodes = self.get_all_episodes(pid, max_episodes)
         
@@ -599,10 +610,10 @@ class XiaoyuzhouDownloader:
         }
         self.save_data_json(pid, json_data, podcast_title)
 
-        result = self.download_podcast(episodes, with_subtitles=with_subtitles)
+        result = self.download_podcast(episodes, subtitle_format=subtitle_format)
         return result
 
-    def download_single_episode(self, eid: str, save_only: bool = False, with_subtitles: bool = False) -> Dict[str, Any]:
+    def download_single_episode(self, eid: str, save_only: bool = False, subtitle_format: Optional[str] = None) -> Dict[str, Any]:
         """下载单个单集"""
         print(f"🚀 开始获取单集信息: {eid}", file=sys.stderr)
 
@@ -675,7 +686,7 @@ class XiaoyuzhouDownloader:
         filepath = download_dir / filename
         
         # 字幕文件名
-        subtitle_filename = f"{safe_title}.txt"
+        subtitle_filename = f"{safe_title}.{subtitle_format or 'txt'}"
         subtitle_filepath = download_dir / subtitle_filename
 
         success = True
@@ -687,7 +698,7 @@ class XiaoyuzhouDownloader:
             print(f"💾 仅保存元数据", file=sys.stderr)
             
         # 如果下载成功（或者只是保存元数据），尝试下载字幕
-        if success and with_subtitles:
+        if success and subtitle_format:
             # 检查字幕是否已存在
             if subtitle_filepath.exists():
                 print(f"⏩ 跳过已存在的字幕: {subtitle_filename}", file=sys.stderr)
@@ -703,7 +714,7 @@ class XiaoyuzhouDownloader:
                             transcript_url = inner_data.get("transcriptUrl")
 
                     if transcript_url:
-                        self.download_subtitle(transcript_url, subtitle_filepath)
+                        self.download_subtitle(transcript_url, subtitle_filepath, subtitle_format)
                     else:
                         print(f"  ⚠️  未找到字幕", file=sys.stderr)
                 else:
@@ -752,7 +763,12 @@ class XiaoyuzhouDownloader:
                 "success": False
             }
 
-    def download_from_json(self, json_file: str, with_subtitles: bool = False) -> Dict[str, Any]:
+    def download_from_json(
+        self,
+        json_file: str,
+        subtitle_format: Optional[str] = None,
+        download_audio: bool = True
+    ) -> Dict[str, Any]:
         """从JSON文件下载"""
         data = self.load_from_json(json_file)
         episodes = data.get('episodes', [])
@@ -761,7 +777,11 @@ class XiaoyuzhouDownloader:
             print("JSON文件中没有找到有效的单集数据")
             return None
 
-        result = self.download_podcast(episodes, with_subtitles=with_subtitles)
+        result = self.download_podcast(
+            episodes,
+            subtitle_format=subtitle_format,
+            download_audio=download_audio
+        )
         return result
 
     def display_podcast_info(self, podcast_info: Dict[str, Any]):

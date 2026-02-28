@@ -243,3 +243,29 @@ def save_metadata_files(metadata: Dict[str, Any], output_dir: Path, filename_bas
             f.write("\n## 简介\n\n")
             f.write(description)
             f.write("\n")
+
+
+def transcript_to_srt(data: list) -> str:
+    """将字幕JSON数据转换为SRT格式"""
+    lines = []
+    for i, item in enumerate(data):
+        if not isinstance(item, dict) or 'text' not in item:
+            continue
+        start_ms = item.get('startMs', 0)
+        # 结束时间用下一条的开始时间，最后一条加2秒
+        if i + 1 < len(data) and isinstance(data[i + 1], dict):
+            end_ms = data[i + 1].get('startMs', start_ms + 2000)
+        else:
+            end_ms = start_ms + 2000
+
+        def ms_to_srt_time(ms: int) -> str:
+            h, rem = divmod(ms, 3600000)
+            m, rem = divmod(rem, 60000)
+            s, ms_ = divmod(rem, 1000)
+            return f"{h:02d}:{m:02d}:{s:02d},{ms_:03d}"
+
+        lines.append(str(i + 1))
+        lines.append(f"{ms_to_srt_time(start_ms)} --> {ms_to_srt_time(end_ms)}")
+        lines.append(item['text'])
+        lines.append('')
+    return '\n'.join(lines)
