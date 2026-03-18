@@ -3,16 +3,16 @@
 小宇宙播客下载器
 
 使用示例:
-  python main.py                                               # 交互式模式
-  python main.py --login                                       # 交互式输入 refresh_token 登录
-  python main.py --refresh-token <token>                       # 命令行传入 refresh_token 登录
-  python main.py 682c566cc7c5f17595635a2c                    # 基本下载
-  python main.py https://www.xiaoyuzhoufm.com/podcast/6603ea352d9eae5d0a5f9151  # 播客URL下载
-  python main.py https://www.xiaoyuzhoufm.com/episode/6888a0148e06fe8de74811af  # 单集URL下载
-  python main.py 682c566cc7c5f17595635a2c --max-episodes 50  # 限制下载数量
-  python main.py 682c566cc7c5f17595635a2c --output /path/to/download  # 指定下载目录
-  python main.py 682c566cc7c5f17595635a2c --save-only        # 仅保存JSON，不下载
-  python main.py --from-json download/PodcastName/682c566cc7c5f17595635a2c.json  # 从JSON文件下载
+  xyz-dl                                               # 交互式模式
+  xyz-dl --login                                       # 交互式输入 refresh_token 登录
+  xyz-dl --refresh-token <token> --device-id <device_id>  # 命令行传入认证信息
+  xyz-dl 682c566cc7c5f17595635a2c                      # 基本下载
+  xyz-dl https://www.xiaoyuzhoufm.com/podcast/6603ea352d9eae5d0a5f9151  # 播客URL下载
+  xyz-dl https://www.xiaoyuzhoufm.com/episode/6888a0148e06fe8de74811af  # 单集URL下载
+  xyz-dl 682c566cc7c5f17595635a2c --max-episodes 50   # 限制下载数量
+  xyz-dl 682c566cc7c5f17595635a2c --output /path/to/download  # 指定下载目录
+  xyz-dl 682c566cc7c5f17595635a2c --save-only         # 仅保存JSON，不下载
+  xyz-dl --from-json download/PodcastName/682c566cc7c5f17595635a2c.json  # 从JSON文件下载
 
 """
 import argparse
@@ -38,17 +38,18 @@ def create_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 使用示例:
-  python main.py                                                                # 交互式模式
-  python main.py --login                                                        # 交互式输入 refresh_token 登录
-  python main.py --refresh-token <token>                                        # 命令行传入 refresh_token 登录
-  python main.py 682c566cc7c5f17595635a2c                                       # 基本下载
-  python main.py https://www.xiaoyuzhoufm.com/podcast/6603ea352d9eae5d0a5f9151  # 播客URL下载
-  python main.py https://www.xiaoyuzhoufm.com/episode/6888a0148e06fe8de74811af  # 单集URL下载
-  python main.py 682c566cc7c5f17595635a2c --max-episodes 50                     # 限制下载数量
-  python main.py 682c566cc7c5f17595635a2c -o /path/to/download                  # 指定下载目录
-  python main.py 682c566cc7c5f17595635a2c --save-only                           # 仅保存JSON，不下载
-  python main.py 682c566cc7c5f17595635a2c --save-only --subtitles          # 保存JSON，下载字幕（txt），不下载音频
-  python main.py --from-json data/682c566cc7c5f17595635a2c.json                 # 从JSON文件下载
+  xyz-dl                                                                         # 交互式模式
+  xyz-dl --login                                                                 # 交互式输入 refresh_token 登录
+  xyz-dl --refresh-token <token> --device-id <device_id>                         # 命令行传入认证信息
+  xyz-dl 682c566cc7c5f17595635a2c                                                # 基本下载
+  xyz-dl https://www.xiaoyuzhoufm.com/podcast/6603ea352d9eae5d0a5f9151           # 播客URL下载
+  xyz-dl https://www.xiaoyuzhoufm.com/episode/6888a0148e06fe8de74811af           # 单集URL下载
+  xyz-dl 682c566cc7c5f17595635a2c --max-episodes 50                              # 限制下载数量
+  xyz-dl 682c566cc7c5f17595635a2c -o /path/to/download                           # 指定下载目录
+  xyz-dl 682c566cc7c5f17595635a2c --save-only                                    # 仅保存JSON，不下载
+  xyz-dl 682c566cc7c5f17595635a2c --save-only --subtitles                        # 保存JSON，下载字幕（txt），不下载音频
+  xyz-dl --from-json data/682c566cc7c5f17595635a2c.json                          # 从JSON文件下载
+  xyz-dl 682c566cc7c5f17595635a2c --insecure                                     # 临时禁用 HTTPS 证书校验
 """)
 
     parser.add_argument('input', nargs='?', help='播客PID、单集EID或URL（播客的唯一标识符或网址）')
@@ -64,6 +65,7 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument('--info', action='store_true', help='显示详细信息（播客、主播或单集），不下载')
     parser.add_argument('--no-metadata', action='store_true', help='不保存元数据文件（JSON/MD）')
     parser.add_argument('--output', '-o', help='指定下载目录 (默认: download)')
+    parser.add_argument('--insecure', action='store_true', help='临时禁用 HTTPS 证书校验（不安全，仅用于调试或特殊网络环境）')
 
     return parser
 
@@ -116,6 +118,10 @@ def interactive_mode():
                 print("   - 单集URL: https://www.xiaoyuzhoufm.com/episode/6888a0148e06fe8de74811af")
                 continue
 
+            if not extracted_id:
+                print("❌ 未提取到有效ID")
+                continue
+
             if not is_valid_podcast_id(extracted_id):
                 print("❌ ID格式不正确")
                 continue
@@ -137,6 +143,9 @@ def interactive_mode():
             save_only = True
         elif choice == "3":
             downloader = XiaoyuzhouDownloader(auth=auth)
+            if not extracted_id:
+                print("❌ 未提取到有效ID")
+                return False
             return downloader.display_info(input_type, extracted_id)
 
         # 询问是否下载字幕
@@ -158,6 +167,10 @@ def interactive_mode():
                 downloader = XiaoyuzhouDownloader(auth=auth)
                 if not downloader:
                     print("❌ 创建下载器失败")
+                    return False
+
+                if not extracted_id:
+                    print("❌ 未提取到有效ID")
                     return False
 
                 result = downloader.download_single_episode(extracted_id, save_only=save_only, subtitle_format=subtitle_format)
@@ -211,6 +224,10 @@ def interactive_mode():
                 print("❌ 创建下载器失败")
                 return False
 
+            if not extracted_id:
+                print("❌ 未提取到有效ID")
+                return False
+
             if save_only:
                 result = downloader.save_only(extracted_id, max_episodes, subtitle_format=subtitle_format)
             else:
@@ -233,7 +250,7 @@ def interactive_mode():
         return False
 
 
-def handle_login(refresh_token: str = None, device_id: str = None) -> bool:
+def handle_login(refresh_token: str | None = None, device_id: str | None = None) -> bool:
     """处理登录流程"""
     try:
         auth = XiaoyuzhouAuth()
@@ -250,7 +267,7 @@ def handle_login(refresh_token: str = None, device_id: str = None) -> bool:
                 return False
         elif refresh_token:
             print("❌ 使用 --refresh-token 时必须同时提供 --device-id")
-            print("💡 示例: python main.py --refresh-token <token> --device-id <device_id>")
+            print("💡 示例: xyz-dl --refresh-token <token> --device-id <device_id>")
             return False
 
         if auth.interactive_login():
@@ -308,6 +325,10 @@ def handle_download(args) -> bool:
                 print("   - 单集URL: https://www.xiaoyuzhoufm.com/episode/6888a0148e06fe8de74811af")
                 return False
 
+            if not extracted_id:
+                print("❌ 未提取到有效ID")
+                return False
+
             if not is_valid_podcast_id(extracted_id):
                 print("❌ ID格式不正确")
                 return False
@@ -360,6 +381,9 @@ def main():
     # 显示欢迎信息
     print("🎧 小宇宙播客下载器", file=sys.stderr)
     print("📁 配置目录:", Path.cwd().absolute(), file=sys.stderr)
+    config.set('network.insecure', args.insecure)
+    if config.insecure:
+        print("⚠️ 已启用不安全模式：HTTPS 证书校验已禁用，可能泄露 token 或下载到被篡改的内容", file=sys.stderr)
     print("", file=sys.stderr)
 
     # 处理登录请求
