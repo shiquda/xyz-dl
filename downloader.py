@@ -9,19 +9,18 @@ from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Optional, Any
 import requests
-import urllib3
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from tqdm import tqdm
 
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
 try:
+    from .api import XiaoyuzhouAPI
     from .auth import XiaoyuzhouAuth
     from .config import config
     from .utils import sanitize_filename, format_size, get_file_extension, create_directory, print_table, save_metadata_files, transcript_to_srt
 except ImportError:
     # 如果作为独立模块运行
+    from api import XiaoyuzhouAPI
     from auth import XiaoyuzhouAuth
     from config import config
     from utils import sanitize_filename, format_size, get_file_extension, create_directory, print_table, save_metadata_files, transcript_to_srt
@@ -33,6 +32,7 @@ class XiaoyuzhouDownloader:
     def __init__(self, auth: Optional[XiaoyuzhouAuth] = None, save_metadata: bool = True):
         self.auth = auth or XiaoyuzhouAuth()
         self.save_metadata_enabled = save_metadata
+        self.api: Optional[XiaoyuzhouAPI] = None
 
         # 确保认证
         if not self.auth.ensure_authenticated():
@@ -47,11 +47,16 @@ class XiaoyuzhouDownloader:
         # 创建带重试机制的session
         self.download_session = self.create_robust_session()
 
-    def create_robust_session(self):
+    def get_active_api(self) -> XiaoyuzhouAPI:
+        if self.api is None:
+            raise RuntimeError("API实例不可用")
+        return self.api
+
+    def create_robust_session(self) -> requests.Session:
         """创建具有重试机制的下载会话"""
         session = requests.Session()
 
-        session.verify = False
+        session.verify = not config.insecure
 
         # 配置重试策略
         retry_strategy = Retry(
@@ -64,9 +69,6 @@ class XiaoyuzhouDownloader:
         adapter = HTTPAdapter(max_retries=retry_strategy)
         session.mount("http://", adapter)
         session.mount("https://", adapter)
-
-        # 设置超时
-        session.timeout = config.get('download.timeout', 60)
 
         return session
 
@@ -273,7 +275,7 @@ class XiaoyuzhouDownloader:
             page_count += 1
 
             try:
-                result = self.api.get_episodes_page(pid, load_more_key)
+                result = self.get_active_api().get_episodes_page(pid, load_more_key)
 
                 if not result["success"]:
                     print(f"\n❌ 第 {page_count} 页获取失败: {result['error']}", file=sys.stderr)
@@ -349,7 +351,7 @@ class XiaoyuzhouDownloader:
                     print(f"✅ [{i:03d}] 已有权限，正在下载付费内容")
                 else:
                     # 尝试获取私有媒体URL
-                    private_result = self.api.get_private_media_url(eid)
+                    private_result = self.get_active_api().get_private_media_url(eid)
 
                     if private_result["success"]:
                         private_data = private_result["data"]
@@ -414,7 +416,7 @@ class XiaoyuzhouDownloader:
                                 print(f"  ⏩ 跳过已存在的字幕: {task['subtitle_filepath'].name}", file=sys.stderr)
                             else:
                                 # 获取字幕URL
-                                transcript_result = self.api.get_episode_transcript(task['eid'], task['media_id'])
+                                transcript_result = self.get_active_api().get_episode_transcript(task['eid'], task['media_id'])
                                 if transcript_result["success"]:
                                     transcript_url = None
                                     api_data = transcript_result.get("data")
@@ -460,7 +462,7 @@ class XiaoyuzhouDownloader:
         episodes: List[Dict],
         subtitle_format: Optional[str] = None,
         download_audio: bool = True
-    ) -> Dict[str, Any]:
+    ) -> Optional[Dict[str, Any]]:
         """下载播客的所有单集"""
         if not episodes:
             print("没有找到单集数据")
@@ -548,7 +550,7 @@ class XiaoyuzhouDownloader:
             # 或者修改download_episodes_sequential，增加audio_download=False？
             
             # 简单起见，我直接在这里遍历下载字幕
-            download_dir = self.create_download_directory(podcast_title)
+            download_dir = self.create_download_directory(podcast_title or 'Unknown_Podcast')
             
             count = 0
             for i, episode in enumerate(episodes, 1):
@@ -571,7 +573,10 @@ class XiaoyuzhouDownloader:
                     print(f"⏳ 等待 {delay:.1f} 秒以避免频率过快...", file=sys.stderr)
                     time.sleep(delay)
                 
-                transcript_result = self.api.get_episode_transcript(eid, media_id)
+                if not eid or not media_id:
+                    continue
+
+                transcript_result = self.get_active_api().get_episode_transcript(eid, media_id)
                 if transcript_result["success"]:
                     transcript_url = None
                     api_data = transcript_result.get("data")
@@ -593,7 +598,7 @@ class XiaoyuzhouDownloader:
             "fetch_time": json_data["fetch_time"]
         }
 
-    def download(self, pid: str, max_episodes: Optional[int] = None, subtitle_format: Optional[str] = None) -> Dict[str, Any]:
+    def download(self, pid: str, max_episodes: Optional[int] = None, subtitle_format: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """主下载方法"""
         episodes = self.get_all_episodes(pid, max_episodes)
         
@@ -613,12 +618,12 @@ class XiaoyuzhouDownloader:
         result = self.download_podcast(episodes, subtitle_format=subtitle_format)
         return result
 
-    def download_single_episode(self, eid: str, save_only: bool = False, subtitle_format: Optional[str] = None) -> Dict[str, Any]:
+    def download_single_episode(self, eid: str, save_only: bool = False, subtitle_format: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """下载单个单集"""
         print(f"🚀 开始获取单集信息: {eid}", file=sys.stderr)
 
         # 获取单集信息
-        result = self.api.get_episode_info(eid)
+        result = self.get_active_api().get_episode_info(eid)
         if not result["success"]:
             print(f"❌ 获取单集信息失败: {result['error']}", file=sys.stderr)
             return None
@@ -640,7 +645,7 @@ class XiaoyuzhouDownloader:
                 print(f"✅ 已有权限，正在下载付费内容", file=sys.stderr)
             else:
                 # 尝试获取私有媒体URL
-                private_result = self.api.get_private_media_url(eid)
+                private_result = self.get_active_api().get_private_media_url(eid)
 
                 if private_result["success"]:
                     private_data = private_result["data"]
@@ -704,7 +709,7 @@ class XiaoyuzhouDownloader:
                 print(f"⏩ 跳过已存在的字幕: {subtitle_filename}", file=sys.stderr)
             else:
                 # 获取字幕URL
-                transcript_result = self.api.get_episode_transcript(eid, media_id)
+                transcript_result = self.get_active_api().get_episode_transcript(eid, media_id)
                 if transcript_result["success"]:
                     transcript_url = None
                     api_data = transcript_result.get("data")
@@ -768,7 +773,7 @@ class XiaoyuzhouDownloader:
         json_file: str,
         subtitle_format: Optional[str] = None,
         download_audio: bool = True
-    ) -> Dict[str, Any]:
+    ) -> Optional[Dict[str, Any]]:
         """从JSON文件下载"""
         data = self.load_from_json(json_file)
         episodes = data.get('episodes', [])
@@ -832,7 +837,7 @@ class XiaoyuzhouDownloader:
     def display_info(self, input_type: str, extracted_id: str) -> bool:
         """根据输入类型显示详细信息"""
         if input_type == "episode":
-            result = self.api.get_episode_info(extracted_id)
+            result = self.get_active_api().get_episode_info(extracted_id)
             if not result["success"]:
                 print(f"❌ 获取单集信息失败: {result['error']}")
                 return False
@@ -847,7 +852,7 @@ class XiaoyuzhouDownloader:
             # 我们需要先获取播客的第一个单集来获取播客详情
             # 或者如果有专门的播客详情接口更好
             # 目前 XiaoyuzhouAPI 只有 get_episodes_page
-            result = self.api.get_episodes_page(extracted_id, limit=1)
+            result = self.get_active_api().get_episodes_page(extracted_id, limit=1)
             if not result["success"]:
                 print(f"❌ 获取播客信息失败: {result['error']}")
                 return False

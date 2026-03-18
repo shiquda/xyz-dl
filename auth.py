@@ -72,10 +72,9 @@ class XiaoyuzhouAuth:
                 "error": "refresh_token 或 device_id 无效，请重新获取"
             }
 
-    def save_credentials(self, filepath: Optional[str] = None) -> bool:
+    def save_credentials(self, filepath: Optional[Path] = None) -> bool:
         """保存认证信息到文件"""
-        if not filepath:
-            filepath = self.credentials_file
+        file_path = filepath or self.credentials_file
 
         if self.access_token and self.device_id:
             credentials = {
@@ -86,25 +85,24 @@ class XiaoyuzhouAuth:
             }
 
             try:
-                Path(filepath).parent.mkdir(parents=True, exist_ok=True)
-                with open(filepath, 'w', encoding='utf-8') as f:
+                file_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(file_path, 'w', encoding='utf-8') as f:
                     json.dump(credentials, f, ensure_ascii=False, indent=2)
 
-                print(f"✅ 认证信息已保存到 {filepath}")
+                print(f"✅ 认证信息已保存到 {file_path}")
                 return True
             except Exception as e:
                 print(f"❌ 保存认证信息失败: {e}")
                 return False
         return False
 
-    def load_credentials(self, filepath: Optional[str] = None) -> bool:
+    def load_credentials(self, filepath: Optional[Path] = None) -> bool:
         """从文件加载认证信息"""
-        if not filepath:
-            filepath = self.credentials_file
+        file_path = filepath or self.credentials_file
 
         try:
-            if os.path.exists(filepath):
-                with open(filepath, 'r', encoding='utf-8') as f:
+            if os.path.exists(file_path):
+                with open(file_path, 'r', encoding='utf-8') as f:
                     credentials = json.load(f)
 
                 self.access_token = credentials.get("access_token")
@@ -114,7 +112,7 @@ class XiaoyuzhouAuth:
                 if self.access_token and self.device_id:
                     # 更新API实例的认证信息
                     self.api.update_credentials(self.access_token, self.device_id)
-                    print(f"✅ 已从 {filepath} 加载认证信息")
+                    print(f"✅ 已从 {file_path} 加载认证信息")
                     return True
         except Exception as e:
             print(f"⚠️ 加载认证信息失败: {e}")
@@ -159,7 +157,6 @@ class XiaoyuzhouAuth:
 
         try:
             import requests
-            import urllib3
             from datetime import datetime
 
             refresh_url = "https://api.xiaoyuzhoufm.com/app_auth_tokens.refresh"
@@ -192,13 +189,12 @@ class XiaoyuzhouAuth:
             }
 
             print("🔄 正在刷新access_token...")
-            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
             response = requests.get(
                 refresh_url,
                 headers=refresh_headers,
                 timeout=10,
-                verify=False
+                verify=not config.insecure
             )
 
             if response.status_code == 200:
@@ -235,7 +231,6 @@ class XiaoyuzhouAuth:
 
         try:
             import requests
-            import urllib3
 
             verify_url = "https://api.xiaoyuzhoufm.com/v1/profile/get"
             verify_headers = self.api.get_default_headers()
@@ -244,8 +239,13 @@ class XiaoyuzhouAuth:
                 "x-jike-device-id": self.device_id
             })
 
-            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-            response = requests.get(verify_url, headers=verify_headers, json={}, timeout=10, verify=False)
+            response = requests.get(
+                verify_url,
+                headers=verify_headers,
+                json={},
+                timeout=10,
+                verify=not config.insecure
+            )
             return response.status_code == 200
 
         except Exception:
@@ -287,7 +287,7 @@ class XiaoyuzhouAuth:
 
         return False
 
-    def get_api(self) -> XiaoyuzhouAPI:
+    def get_api(self) -> Optional[XiaoyuzhouAPI]:
         """获取已认证的API实例"""
         if not self.ensure_authenticated():
             print("认证失败")
