@@ -22,6 +22,9 @@ class Config:
                 "timeout": 30,
                 "max_retries": 3
             },
+            "network": {
+                "insecure": False
+            },
             "download": {
                 "chunk_size": 8192,
                 "download_dir": "download",
@@ -117,6 +120,10 @@ class Config:
     @property
     def api_timeout(self) -> int:
         return self.get('api.timeout')
+
+    @property
+    def insecure(self) -> bool:
+        return bool(self.get('network.insecure', False))
 
     @property
     def credentials_file(self) -> Path:

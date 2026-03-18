@@ -1,11 +1,21 @@
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 import json
+import api
 from api import XiaoyuzhouAPI
 
 class TestXiaoyuzhouAPI(unittest.TestCase):
     def setUp(self):
         self.api = XiaoyuzhouAPI()
+
+    def test_session_verify_follows_insecure_config(self):
+        with patch.object(type(api.config), 'insecure', new_callable=PropertyMock, return_value=False):
+            secure_api = XiaoyuzhouAPI()
+        self.assertTrue(secure_api.session.verify)
+
+        with patch.object(type(api.config), 'insecure', new_callable=PropertyMock, return_value=True):
+            insecure_api = XiaoyuzhouAPI()
+        self.assertFalse(insecure_api.session.verify)
 
     @patch('api.requests.Session.request')
     def test_get_episode_transcript_success(self, mock_request):

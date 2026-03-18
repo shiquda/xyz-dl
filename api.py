@@ -2,7 +2,6 @@
 小宇宙API接口封装
 """
 import requests
-import urllib3
 from typing import Dict, Any, Optional
 from datetime import datetime
 import time
@@ -13,10 +12,6 @@ except ImportError:
     # 如果作为独立模块运行
     from config import config
 
-# 禁用SSL证书验证警告
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-
 class XiaoyuzhouAPI:
     """小宇宙API接口类"""
 
@@ -25,7 +20,7 @@ class XiaoyuzhouAPI:
         self.access_token = access_token
         self.device_id = device_id
         self.session = requests.Session()
-        self.session.verify = False
+        self.session.verify = not config.insecure
         self.auth_handler = None
 
         self.session.headers.update({
@@ -129,7 +124,12 @@ class XiaoyuzhouAPI:
         try:
             # 使用json.dumps确保内容格式控制，特别是对于嵌套的json字符串
             import json
-            response = requests.post(url, data=json.dumps(payload), headers=headers)
+            response = requests.post(
+                url,
+                data=json.dumps(payload),
+                headers=headers,
+                verify=not config.insecure
+            )
 
             print(f"🔍 发送验证码响应状态码: {response.status_code}")
             if response.status_code != 200:
@@ -158,7 +158,12 @@ class XiaoyuzhouAPI:
         }
 
         try:
-            response = requests.post(url, json=payload, headers=headers)
+            response = requests.post(
+                url,
+                json=payload,
+                headers=headers,
+                verify=not config.insecure
+            )
 
             print(f"🔍 登录响应状态码: {response.status_code}")
 
@@ -297,12 +302,17 @@ class XiaoyuzhouAPI:
         except requests.RequestException as e:
             return {"success": False, "error": str(e)}
 
-    def update_credentials(self, access_token: str, device_id: str):
+    def update_credentials(self, access_token: Optional[str], device_id: Optional[str]) -> None:
         """更新认证信息"""
         self.access_token = access_token
         self.device_id = device_id
 
-        self.session.headers.update({
-            'x-jike-access-token': access_token,
-            'x-jike-device-id': device_id
-        })
+        if access_token:
+            self.session.headers['x-jike-access-token'] = access_token
+        else:
+            self.session.headers.pop('x-jike-access-token', None)
+
+        if device_id:
+            self.session.headers['x-jike-device-id'] = device_id
+        else:
+            self.session.headers.pop('x-jike-device-id', None)
